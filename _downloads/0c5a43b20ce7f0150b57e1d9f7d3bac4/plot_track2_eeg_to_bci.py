@@ -1,0 +1,104 @@
+"""
+Track 2 -- BCI command decoding (cross-session)
+=================================================
+
+Given short EEG windows recorded while a user performs one of three
+cued mental commands (kinesthetic motor imagery, mental calculation, or
+letter/word association), decode the active command. The competition
+tests **cross-session** generalisation: models train on a subject's
+early sessions and are scored on their later ones, with no per-session
+recalibration allowed.
+
+- **Shift**: early sessions -> later sessions (Graz + BrainHero
+  contexts).
+- **Headline metric**: balanced accuracy averaged over
+  subject-session-context cells (higher is better).
+- **Data**: 20 subjects, 6 sessions each, BrainAmp/actiCAP. Sessions
+  1-3 of the 10 evaluation subjects are released as labelled
+  calibration; sessions 4-6 are the hidden test set. The 10 training
+  subjects have all 6 sessions released.
+
+.. note::
+   The official Track 2 corpus (Graz / BrainHero, 3 classes: MI / Calc
+   / Word) is released through NeuralBench when submissions open.
+   NeuralBench's :doc:`motor_imagery
+   </neuralbench/tasks/eeg/motor_imagery>` task is the closest
+   analog and is used here as the starter-kit baseline.
+"""
+
+# %%
+# NeuralBench mapping (starter-kit analog)
+# -----------------------------------------
+#
+# - **CLI**: ``neuralbench eeg motor_imagery``
+# - **Default dataset**: ``Stieger2021Continuous`` (62 subjects,
+#   60-channel EEG, 4-class motor imagery -- LH / RH / Both / Rest).
+# - **Shift**: cross-subject (NeuralBench's default split), *not* the
+#   cross-session shift of the competition. Use it to validate the
+#   training pipeline and architecture choice.
+# - **Headline metric key**: ``test/bal_acc``.
+#
+# .. dropdown:: Show ``tasks/eeg/motor_imagery/config.yaml``
+#
+#    .. literalinclude:: ../../../../neuralbench-repo/neuralbench/tasks/eeg/motor_imagery/config.yaml
+#       :language: yaml
+
+# %%
+# Reproducing the baseline
+# ------------------------
+#
+# ``Stieger2021Continuous`` and the alternative MI datasets are served by
+# MOABB, which the base install does not pull, so install it first:
+# ``pip install 'moabb>=1.7.1'``. Budget ~600 GB under ``DATA_DIR`` for the
+# download, plus ~280 GB for the copy MOABB converts on first read -- or
+# start on the much smaller ``tangermann2012`` described below.
+#
+# .. code-block:: bash
+#
+#    # 1. Download Stieger2021Continuous
+#    neuralbench eeg motor_imagery --download
+#
+#    # 2. Prepare the preprocessing cache
+#    neuralbench eeg motor_imagery --prepare
+#
+#    # 3. Quick local sanity check
+#    neuralbench eeg motor_imagery --debug
+#
+#    # 4. Full baseline -- task-specific model (EEGNet)
+#    neuralbench eeg motor_imagery -m eegnet
+#
+#    # 5. Full baseline -- foundation model (REVE)
+#    neuralbench eeg motor_imagery -m reve
+#
+# Other MI datasets registered in
+# :doc:`/neuralbench/tasks/eeg/motor_imagery` (MOABB, Dreyer2023,
+# BCI Competition IV, ...) can also be selected with ``--dataset
+# <name>`` and are useful for stress-testing cross-subject behaviour.
+#
+# ``--dataset tangermann2012`` is the one to reach for first: BCI
+# Competition IV-2a is 9 subjects of 22-channel four-class MI in under
+# 1 GB, so the whole download-prepare-train loop can be exercised
+# against a well-known published baseline before committing ~900 GB to
+# ``Stieger2021Continuous``.
+
+# %%
+# Adapting to the competition setup
+# ----------------------------------
+#
+# To match the official Track 2 evaluation regime, two pieces need to
+# change once the official dataset is released:
+#
+# 1. **Dataset source**: register the new MI / Calc / Word study and
+#    set ``data.study.source.name`` to it, with
+#    ``brain_model_output_size: 3``.
+# 2. **Split**: replace the default ``SklearnSplit`` with a
+#    predefined per-subject split where sessions 1-3 are train and
+#    sessions 4-6 are test. The
+#    ``neuralset.events.transforms.PredefinedSplit`` already used by
+#    ``reaction_time`` and ``psychopathology`` is the right primitive
+#    -- the ``test_split_query`` becomes
+#    ``"subject in evaluation_subjects and session in [4, 5, 6]"``.
+#
+# Submissions may dispatch internally to per-subject sub-models using
+# the per-example metadata dictionary ``m`` (subject, session, run,
+# paradigm). Re-training on the hidden later sessions is forbidden.
